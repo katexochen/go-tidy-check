@@ -19,24 +19,24 @@ import (
 )
 
 func main() {
-	ok, err := check()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	tidy, err := run(ctx)
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
 		os.Exit(1)
 	}
-	if !ok {
+	if !tidy {
 		os.Exit(1)
 	}
 }
 
-func check() (bool, error) {
+func run(ctx context.Context) (bool, error) {
 	verbose := flag.Bool("v", false, "verbose debug output")
-	diff := flag.Bool("d", false, "print diff")
-	path := flag.String("p", "", "path to the Go module")
+	diff := flag.Bool("d", false, "print diffs")
 	flag.Parse()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
+	paths := flag.Args()
 
 	var logger logger
 	if *verbose {
@@ -45,8 +45,34 @@ func check() (bool, error) {
 		logger = nopLogger{}
 	}
 
+	if len(paths) == 0 {
+		paths = append(paths, "")
+	}
+
+	var result bool
+	for _, path := range paths {
+		tidy, err := check(ctx, path, *diff, logger)
+		if err != nil {
+			return false, fmt.Errorf("checking module %q: %w", path, err)
+		}
+		result = result || tidy
+	}
+
+	return result, nil
+}
+
+func check(ctx context.Context, path string, diff bool, logger logger) (bool, error) {
+	if strings.HasSuffix(path, "/...") {
+		logger.Log("timming trailing /... from module path %q", path)
+		path = strings.TrimSuffix(path, "/...")
+	}
+
+	logger.Log("checking module %q", path)
+	modPath := filepath.Join(path, "go.mod")
+	sumPath := filepath.Join(path, "go.sum")
+
 	logger.Log("opening repository")
-	repo, err := git.PlainOpenWithOptions(*path, &git.PlainOpenOptions{DetectDotGit: true})
+	repo, err := git.PlainOpenWithOptions(path, &git.PlainOpenOptions{DetectDotGit: true})
 	if err != nil {
 		return false, fmt.Errorf("opening repo: %w", err)
 	}
@@ -60,8 +86,8 @@ func check() (bool, error) {
 		return false, errors.New("repo repo has uncommitted changes")
 	}
 
-	logger.Log("reading go.mod & go.sum")
-	mod, sum, err := readFiles(*path)
+	logger.Log("reading %q & %q", modPath, sumPath)
+	mod, sum, err := readFiles(modPath, sumPath)
 	if err != nil {
 		return false, err
 	}
@@ -70,7 +96,7 @@ func check() (bool, error) {
 
 	logger.Log("running go mod tidy")
 	tidyCmd := exec.CommandContext(ctx, "go", "mod", "tidy")
-	tidyCmd.Dir = *path
+	tidyCmd.Dir = path
 	if err := tidyCmd.Run(); err != nil {
 		panic(err)
 	}
@@ -86,8 +112,8 @@ func check() (bool, error) {
 	}
 
 	var pathOut string
-	if *path != "" {
-		pathOut = *path
+	if path != "" {
+		pathOut = path
 		if !strings.HasPrefix(pathOut, "/") && !strings.HasPrefix(pathOut, ".") {
 			pathOut = "./" + pathOut
 		}
@@ -95,27 +121,27 @@ func check() (bool, error) {
 	}
 	fmt.Printf("go module%s isn't tidy\n", pathOut)
 
-	if !*diff {
+	if !diff {
 		return false, nil
 	}
 
 	logger.Log("generating diffs")
-	if err := printDiffs(*path, mod, sum); err != nil {
+	if err := printDiffs(modPath, sumPath, mod, sum); err != nil {
 		return false, fmt.Errorf("printing diffs: %w", err)
 	}
 
 	return false, nil
 }
 
-func readFiles(path string) (mod, sum []byte, err error) {
-	mod, err = os.ReadFile(filepath.Join(path, "go.mod"))
+func readFiles(modPath, sumPath string) (mod, sum []byte, err error) {
+	mod, err = os.ReadFile(modPath)
 	if err != nil {
-		return nil, nil, fmt.Errorf("reading go.mod: %w", err)
+		return nil, nil, fmt.Errorf("reading %q: %w", modPath, err)
 	}
 
-	sum, err = os.ReadFile(filepath.Join(path, "go.sum"))
+	sum, err = os.ReadFile(sumPath)
 	if err != nil {
-		return nil, nil, fmt.Errorf("reading go.sum: %w", err)
+		return nil, nil, fmt.Errorf("reading %q: %w", sumPath, err)
 	}
 
 	return mod, sum, nil
@@ -144,20 +170,31 @@ func repoReset(repo *git.Repository, logger logger) error {
 	return nil
 }
 
-func printDiffs(path string, mod, sum []byte) error {
-	mod2, sum2, err := readFiles(path)
+func printDiffs(modPath, sumPath string, mod, sum []byte) error {
+	mod2, sum2, err := readFiles(modPath, sumPath)
 	if err != nil {
 		return err
 	}
 
 	if !bytes.Equal(mod, mod2) {
 		edits := myers.ComputeEdits(span.URIFromPath("go.mod"), string(mod), string(mod2))
-		fmt.Println(gotextdiff.ToUnified("a/go.mod", "b/go.mod", string(mod), edits))
+		fmt.Println(gotextdiff.ToUnified(
+			fmt.Sprintf("a/%s", modPath),
+			fmt.Sprintf("b/%s", modPath),
+			string(mod),
+			edits,
+		))
+
 	}
 
 	if !bytes.Equal(sum, sum2) {
 		edits := myers.ComputeEdits(span.URIFromPath("go.sum"), string(sum), string(sum2))
-		fmt.Print(gotextdiff.ToUnified("a/go.sum", "b/go.sum", string(sum), edits))
+		fmt.Print(gotextdiff.ToUnified(
+			fmt.Sprintf("a/%s", sumPath),
+			fmt.Sprintf("b/%s", sumPath),
+			string(sum),
+			edits,
+		))
 	}
 
 	return nil
@@ -175,24 +212,4 @@ func repoModified(repo *git.Repository) (bool, error) {
 	}
 
 	return !status.IsClean(), nil
-}
-
-// fileModified checks wether the file with the given name has been modified.
-func fileModified(repo *git.Repository, name string) (bool, error) {
-	wt, err := repo.Worktree()
-	if err != nil {
-		return false, fmt.Errorf("getting worktree: %w", err)
-	}
-
-	status, err := wt.Status()
-	if err != nil {
-		return false, fmt.Errorf("getting status: %w", err)
-	}
-
-	entry, ok := status[name]
-	if !ok {
-		return false, errors.New("file not found in worktree status")
-	}
-
-	return entry.Staging != git.Unmodified, nil
 }
