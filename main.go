@@ -33,6 +33,13 @@ func main() {
 }
 
 func run(ctx context.Context) (bool, error) {
+	flag.Usage = func() {
+		fmt.Fprintf(flag.CommandLine.Output(), "go-tidy-check checks if your modules are tidy.\n\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "Usage: \n  %s [flags] [PATH ...]\n\n", os.Args[0])
+		fmt.Fprintln(flag.CommandLine.Output(), "Flags:")
+		flag.PrintDefaults()
+	}
+
 	verbose := flag.Bool("v", false, "verbose debug output")
 	diff := flag.Bool("d", false, "print diffs")
 	flag.Parse()
