@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/go-git/go-git/v5"
@@ -30,6 +32,7 @@ func main() {
 func check() (bool, error) {
 	verbose := flag.Bool("v", false, "verbose debug output")
 	diff := flag.Bool("d", false, "print diff")
+	path := flag.String("p", "", "path to the Go module")
 	flag.Parse()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
@@ -43,7 +46,7 @@ func check() (bool, error) {
 	}
 
 	logger.Log("opening repository")
-	repo, err := git.PlainOpenWithOptions("", &git.PlainOpenOptions{DetectDotGit: true})
+	repo, err := git.PlainOpenWithOptions(*path, &git.PlainOpenOptions{DetectDotGit: true})
 	if err != nil {
 		return false, fmt.Errorf("opening repo: %w", err)
 	}
@@ -58,7 +61,7 @@ func check() (bool, error) {
 	}
 
 	logger.Log("reading go.mod & go.sum")
-	mod, sum, err := readFiles()
+	mod, sum, err := readFiles(*path)
 	if err != nil {
 		return false, err
 	}
@@ -67,6 +70,7 @@ func check() (bool, error) {
 
 	logger.Log("running go mod tidy")
 	tidyCmd := exec.CommandContext(ctx, "go", "mod", "tidy")
+	tidyCmd.Dir = *path
 	if err := tidyCmd.Run(); err != nil {
 		panic(err)
 	}
@@ -81,27 +85,35 @@ func check() (bool, error) {
 		return true, nil
 	}
 
-	fmt.Println("go nodule isn't tidy")
+	var pathOut string
+	if *path != "" {
+		pathOut = *path
+		if !strings.HasPrefix(pathOut, "/") && !strings.HasPrefix(pathOut, ".") {
+			pathOut = "./" + pathOut
+		}
+		pathOut = fmt.Sprintf(" in %q", pathOut)
+	}
+	fmt.Printf("go module%s isn't tidy\n", pathOut)
 
 	if !*diff {
 		return false, nil
 	}
 
 	logger.Log("generating diffs")
-	if err := printDiffs(mod, sum); err != nil {
+	if err := printDiffs(*path, mod, sum); err != nil {
 		return false, fmt.Errorf("printing diffs: %w", err)
 	}
 
 	return false, nil
 }
 
-func readFiles() (mod, sum []byte, err error) {
-	mod, err = os.ReadFile("go.mod")
+func readFiles(path string) (mod, sum []byte, err error) {
+	mod, err = os.ReadFile(filepath.Join(path, "go.mod"))
 	if err != nil {
 		return nil, nil, fmt.Errorf("reading go.mod: %w", err)
 	}
 
-	sum, err = os.ReadFile("go.sum")
+	sum, err = os.ReadFile(filepath.Join(path, "go.sum"))
 	if err != nil {
 		return nil, nil, fmt.Errorf("reading go.sum: %w", err)
 	}
@@ -132,15 +144,10 @@ func repoReset(repo *git.Repository, logger logger) error {
 	return nil
 }
 
-func printDiffs(mod, sum []byte) error {
-	mod2, err := os.ReadFile("go.mod")
+func printDiffs(path string, mod, sum []byte) error {
+	mod2, sum2, err := readFiles(path)
 	if err != nil {
-		return fmt.Errorf("reading go.mod: %w", err)
-	}
-
-	sum2, err := os.ReadFile("go.sum")
-	if err != nil {
-		return fmt.Errorf("reading go.sum: %w", err)
+		return err
 	}
 
 	if !bytes.Equal(mod, mod2) {
