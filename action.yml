@@ -7,7 +7,7 @@ inputs:
     required: false
 runs:
   using: docker
-  image: Dockerfile
+  image: docker://ghcr.io/katexochen/go-tidy-check:v1.0.0
   args:
     - "${{ inputs.modules }}"
 branding:
