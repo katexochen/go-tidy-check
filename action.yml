@@ -10,3 +10,6 @@ runs:
   image: Dockerfile
   args:
     - "${{ inputs.modules }}"
+branding:
+  icon: check
+  color: blue
