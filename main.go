@@ -18,6 +18,9 @@ import (
 	"github.com/hexops/gotextdiff/span"
 )
 
+// Version is the git reference injected at build
+var Version string
+
 func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
@@ -39,11 +42,16 @@ func run(ctx context.Context) (bool, error) {
 		fmt.Fprintln(flag.CommandLine.Output(), "Flags:")
 		flag.PrintDefaults()
 	}
-
 	verbose := flag.Bool("v", false, "verbose debug output")
+	version := flag.Bool("version", false, "print version and exit")
 	diff := flag.Bool("d", false, "print diffs")
 	flag.Parse()
 	paths := flag.Args()
+
+	if *version {
+		fmt.Printf("go-tidy-check %s\n", Version)
+		return true, nil
+	}
 
 	var logger logger
 	if *verbose {
@@ -90,7 +98,7 @@ func check(ctx context.Context, path string, diff bool, logger logger) (bool, er
 		return false, fmt.Errorf("checking for existing modification: %w", err)
 	}
 	if modified {
-		return false, errors.New("repo repo has uncommitted changes")
+		return false, errors.New("repo has uncommitted changes")
 	}
 
 	logger.Log("reading %q & %q", modPath, sumPath)

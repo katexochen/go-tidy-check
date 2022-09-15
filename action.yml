@@ -1,0 +1,12 @@
+name: go-tidy-check
+author: katexochen
+description: go-tidy-check checks if your modules are tidy.
+inputs:
+  modules:
+    description: Path(s) of the modules to check. Separate multiple paths with space. Current working dir is used if empty.
+    required: false
+runs:
+  using: docker
+  image: Dockerfile
+  args:
+    - "${{ inputs.modules }}"
