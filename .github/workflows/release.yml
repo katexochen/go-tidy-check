@@ -65,6 +65,12 @@ jobs:
             "${OUT_BASE}/linux/amd64/go-tidy-check_linux_amd64.tar.gz#go-tidy-check_linux_amd64" \
             "${OUT_BASE}/linux/arm64/go-tidy-check_linux_arm64.tar.gz#go-tidy-check_linux_arm64"
 
+      - name: Update the major version tag
+        id: majorver
+        uses: actions/publish-action@v0.1.0
+        with:
+          source-tag: ${{ env.RELEASE_VERSION }}
+
       - name: Setup buildx
         uses: docker/setup-buildx-action@v1
 
@@ -81,4 +87,5 @@ jobs:
           push: true
           tags: |
             ghcr.io/katexochen/go-tidy-check:${{ env.RELEASE_VERSION }}
+            ghcr.io/katexochen/go-tidy-check:${{ steps.majorver.outputs.major-tag }}
             ghcr.io/katexochen/go-tidy-check:latest
