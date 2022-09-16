@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -10,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 
@@ -84,62 +82,6 @@ func run(ctx context.Context) (bool, error) {
 	}
 
 	return result, nil
-}
-
-func runningAsGitHubAction() bool {
-	return os.Getenv("GITHUB_ACTION_REPOSITORY") == "katexochen/go-tidy-check"
-}
-
-var argsReg = regexp.MustCompile(`("[^"]*"|[^"\s]+)(\s+|$)`)
-
-func pathsInsideContainer(paths []string) ([]string, error) {
-	const mountInfoPath = "/proc/self/mountinfo"
-	const githubContainerMountPoint = "/github/workspace"
-
-	if len(paths) == 1 {
-		// Multiple paths passed as a single string.
-		// This might be the case when running as a GitHub action.
-		argStrs := argsReg.FindAllString(paths[0], -1)
-		args := make([]string, len(argStrs))
-		for i, v := range argStrs {
-			args[i] = strings.TrimSpace(v)
-		}
-		paths = args
-	}
-
-	mountInfo, err := os.Open(mountInfoPath)
-	if err != nil {
-		return nil, fmt.Errorf("reading %q: %w", mountInfoPath, err)
-	}
-
-	lines := bufio.NewScanner(mountInfo)
-	var mountSource string
-	for lines.Scan() {
-		line := lines.Text()
-		fields := strings.Fields(line)
-		if len(fields) < 5 {
-			continue
-		}
-
-		mountPoint := fields[4]
-		if mountPoint != githubContainerMountPoint {
-			continue
-		}
-
-		mountSource = fields[3]
-		fmt.Println("mount source:", mountSource)
-		break
-	}
-
-	for i, path := range paths {
-		if strings.HasPrefix(path, mountSource) {
-			newPath := filepath.Join(githubContainerMountPoint, path[len(mountSource):])
-			paths[i] = newPath
-			fmt.Printf("replacing path %q with %q\n", path, newPath)
-		}
-	}
-
-	return paths, nil
 }
 
 func check(ctx context.Context, path string, diff bool, logger logger) (bool, error) {
