@@ -15,7 +15,7 @@ jobs:
 
       - uses: actions/setup-go@v3
         with:
-          go-version-path: go.mod
+          go-version-file: go.mod
 
       - name: Run integration tests
         run: go test -v ./...

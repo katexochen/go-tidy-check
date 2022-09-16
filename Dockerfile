@@ -16,8 +16,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     go build -ldflags "-X main.Version=${RELEASE_VERSION}" \
     -o go-tidy-check .
 
-FROM gcr.io/distroless/static:latest
+FROM golang:1.19
 WORKDIR /
 COPY --from=builder /workspace/go-tidy-check .
-WORKDIR /workspace
 ENTRYPOINT ["/go-tidy-check"]
