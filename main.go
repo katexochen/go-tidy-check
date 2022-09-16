@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -89,14 +90,21 @@ func runningAsGitHubAction() bool {
 	return os.Getenv("GITHUB_ACTION_REPOSITORY") == "katexochen/go-tidy-check"
 }
 
+var argsReg = regexp.MustCompile(`("[^"]*"|[^"\s]+)(\s+|$)`)
+
 func pathsInsideContainer(paths []string) ([]string, error) {
 	const mountInfoPath = "/proc/self/mountinfo"
 	const githubContainerMountPoint = "/github/workspace"
 
 	if len(paths) == 1 {
-		if strings.Contains(paths[0], " ") { // Multiple paths passed as a single string.
-			paths = strings.Split(paths[0], " ")
+		// Multiple paths passed as a single string.
+		// This might be the case when running as a GitHub action.
+		argStrs := argsReg.FindAllString(paths[0], -1)
+		args := make([]string, len(argStrs))
+		for i, v := range argStrs {
+			args[i] = strings.TrimSpace(v)
 		}
+		paths = args
 	}
 
 	mountInfo, err := os.Open(mountInfoPath)
