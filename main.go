@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -25,12 +26,12 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	tidy, err := run(ctx)
+	untidy, err := run(ctx)
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
 		os.Exit(1)
 	}
-	if !tidy {
+	if untidy {
 		os.Exit(1)
 	}
 }
@@ -50,7 +51,7 @@ func run(ctx context.Context) (bool, error) {
 
 	if *version {
 		fmt.Printf("go-tidy-check %s\n", Version)
-		return true, nil
+		return false, nil
 	}
 
 	var logger logger
@@ -60,20 +61,77 @@ func run(ctx context.Context) (bool, error) {
 		logger = nopLogger{}
 	}
 
+	if runningAsGitHubAction() {
+		var err error
+		paths, err = pathsInsideContainer(paths)
+		if err != nil {
+			return false, fmt.Errorf("getting paths inside container: %w", err)
+		}
+	}
+
 	if len(paths) == 0 {
 		paths = append(paths, "")
 	}
 
 	var result bool
 	for _, path := range paths {
-		tidy, err := check(ctx, path, *diff, logger)
+		untidy, err := check(ctx, path, *diff, logger)
 		if err != nil {
 			return false, fmt.Errorf("checking module %q: %w", path, err)
 		}
-		result = result || tidy
+		result = result || untidy
 	}
 
 	return result, nil
+}
+
+func runningAsGitHubAction() bool {
+	return os.Getenv("GITHUB_ACTION_REPOSITORY") == "katexochen/go-tidy-check"
+}
+
+func pathsInsideContainer(paths []string) ([]string, error) {
+	const mountInfoPath = "/proc/self/mountinfo"
+	const githubContainerMountPoint = "/github/workspace"
+
+	if len(paths) == 1 {
+		if strings.Contains(paths[0], " ") { // Multiple paths passed as a single string.
+			paths = strings.Split(paths[0], " ")
+		}
+	}
+
+	mountInfo, err := os.Open(mountInfoPath)
+	if err != nil {
+		return nil, fmt.Errorf("reading %q: %w", mountInfoPath, err)
+	}
+
+	lines := bufio.NewScanner(mountInfo)
+	var mountSource string
+	for lines.Scan() {
+		line := lines.Text()
+		fields := strings.Fields(line)
+		if len(fields) < 5 {
+			continue
+		}
+
+		mountPoint := fields[4]
+		if mountPoint != githubContainerMountPoint {
+			continue
+		}
+
+		mountSource = fields[3]
+		fmt.Println("mount source:", mountSource)
+		break
+	}
+
+	for i, path := range paths {
+		if strings.HasPrefix(path, mountSource) {
+			newPath := filepath.Join(githubContainerMountPoint, path[len(mountSource):])
+			paths[i] = newPath
+			fmt.Printf("replacing path %q with %q\n", path, newPath)
+		}
+	}
+
+	return paths, nil
 }
 
 func check(ctx context.Context, path string, diff bool, logger logger) (bool, error) {
@@ -123,7 +181,7 @@ func check(ctx context.Context, path string, diff bool, logger logger) (bool, er
 	}
 
 	if !modified {
-		return true, nil
+		return false, nil
 	}
 
 	var pathOut string
@@ -137,7 +195,7 @@ func check(ctx context.Context, path string, diff bool, logger logger) (bool, er
 	fmt.Printf("go module%s isn't tidy\n", pathOut)
 
 	if !diff {
-		return false, nil
+		return true, nil
 	}
 
 	logger.Log("generating diffs")
@@ -145,7 +203,7 @@ func check(ctx context.Context, path string, diff bool, logger logger) (bool, er
 		return false, fmt.Errorf("printing diffs: %w", err)
 	}
 
-	return false, nil
+	return true, nil
 }
 
 func readFiles(modPath, sumPath string) (mod, sum []byte, err error) {
