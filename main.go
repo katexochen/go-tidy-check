@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-git/go-git/v5"
 	"github.com/hexops/gotextdiff"
 	"github.com/hexops/gotextdiff/myers"
 	"github.com/hexops/gotextdiff/span"
@@ -102,28 +101,13 @@ func check(ctx context.Context, path string, diff bool, logger logger) (bool, er
 	modPath := filepath.Join(path, "go.mod")
 	sumPath := filepath.Join(path, "go.sum")
 
-	logger.Log("opening repository")
-	repo, err := git.PlainOpenWithOptions(path, &git.PlainOpenOptions{DetectDotGit: true})
-	if err != nil {
-		return false, fmt.Errorf("opening repo: %w", err)
-	}
-
-	logger.Log("checking if repository is modified")
-	modified, err := repoModified(repo)
-	if err != nil {
-		return false, fmt.Errorf("checking for existing modification: %w", err)
-	}
-	if modified {
-		return false, errors.New("repo has uncommitted changes")
-	}
-
 	logger.Log("reading %q & %q", modPath, sumPath)
 	mod, sum, err := readFiles(modPath, sumPath, logger)
 	if err != nil {
 		return false, err
 	}
 
-	defer repoReset(repo, logger)
+	defer restoreFiles(modPath, sumPath, mod, sum, logger)
 
 	logger.Log("running go mod tidy")
 	tidyCmd := exec.CommandContext(ctx, "go", "mod", "tidy")
@@ -136,15 +120,17 @@ func check(ctx context.Context, path string, diff bool, logger logger) (bool, er
 		return false, fmt.Errorf("running 'go mod tidy': %w", err)
 	}
 
-	logger.Log("checking if go.mod and go.sum have been modified")
-	modified, err = repoModified(repo)
+	logger.Log("reading %q & %q again", modPath, sumPath)
+	mod2, sum2, err := readFiles(modPath, sumPath, logger)
 	if err != nil {
-		return false, fmt.Errorf("checking for modification: %w", err)
+		return false, err
 	}
 
-	if !modified {
+	if !modified(mod, mod2, sum, sum2) {
+		logger.Log("%q and %q are tidy", modPath, sumPath)
 		return false, nil
 	}
+	logger.Log("%q and %q are not tidy", modPath, sumPath)
 
 	var pathOut string
 	if path != "" {
@@ -161,7 +147,7 @@ func check(ctx context.Context, path string, diff bool, logger logger) (bool, er
 	}
 
 	logger.Log("generating diffs")
-	if err := printDiffs(modPath, sumPath, mod, sum, logger); err != nil {
+	if err := printDiffs(modPath, sumPath, mod, mod2, sum, sum2, logger); err != nil {
 		return false, fmt.Errorf("printing diffs: %w", err)
 	}
 
@@ -186,52 +172,48 @@ func readFiles(modPath, sumPath string, logger logger) (mod, sum []byte, err err
 	return mod, sum, nil
 }
 
-func repoReset(repo *git.Repository, logger logger) error {
-	wt, err := repo.Worktree()
-	if err != nil {
-		logger.Log("error: getting worktree:", err)
-		return fmt.Errorf("getting worktree: %w", err)
+func restoreFiles(modPath, sumPath string, mod, sum []byte, logger logger) error {
+	if err := os.WriteFile(modPath, mod, 0); err != nil {
+		return fmt.Errorf("writing %q: %w", modPath, err)
+	}
+	logger.Log("restored %q", modPath)
+
+	if len(sum) == 0 {
+		logger.Log("removing %q, as it didn't exist before", sumPath)
+
+		if err := os.Remove(sumPath); err != nil {
+			return fmt.Errorf("removing %q: %w", sumPath, err)
+		}
+
+		return nil
 	}
 
-	logger.Log("resetting repository")
-	if err := wt.Reset(&git.ResetOptions{Mode: git.HardReset}); err != nil {
-		logger.Log("error: resetting worktree:", err)
-		return fmt.Errorf("resetting worktree: %w", err)
+	if err := os.WriteFile(sumPath, sum, 0); err != nil {
+		return fmt.Errorf("writing %q: %w", sumPath, err)
 	}
+	logger.Log("restored %q", sumPath)
 
-	logger.Log("cleaning repository")
-	if err := wt.Clean(&git.CleanOptions{Dir: true}); err != nil {
-		logger.Log("error: cleaning worktree:", err)
-		return fmt.Errorf("cleaning worktree: %w", err)
-	}
-
-	logger.Log("repository successfully reset")
 	return nil
 }
 
-func printDiffs(modPath, sumPath string, mod, sum []byte, logger logger) error {
-	mod2, sum2, err := readFiles(modPath, sumPath, logger)
-	if err != nil {
-		return err
-	}
-
-	if !bytes.Equal(mod, mod2) {
-		edits := myers.ComputeEdits(span.URIFromPath("go.mod"), string(mod), string(mod2))
+func printDiffs(modPath, sumPath string, mod1, mod2, sum1, sum2 []byte, logger logger) error {
+	if !bytes.Equal(mod1, mod2) {
+		edits := myers.ComputeEdits(span.URIFromPath("go.mod"), string(mod1), string(mod2))
 		fmt.Println(gotextdiff.ToUnified(
 			fmt.Sprintf("a/%s", modPath),
 			fmt.Sprintf("b/%s", modPath),
-			string(mod),
+			string(mod1),
 			edits,
 		))
 
 	}
 
-	if !bytes.Equal(sum, sum2) {
-		edits := myers.ComputeEdits(span.URIFromPath("go.sum"), string(sum), string(sum2))
+	if !bytes.Equal(sum1, sum2) {
+		edits := myers.ComputeEdits(span.URIFromPath("go.sum"), string(sum1), string(sum2))
 		fmt.Print(gotextdiff.ToUnified(
 			fmt.Sprintf("a/%s", sumPath),
 			fmt.Sprintf("b/%s", sumPath),
-			string(sum),
+			string(sum1),
 			edits,
 		))
 	}
@@ -239,16 +221,6 @@ func printDiffs(modPath, sumPath string, mod, sum []byte, logger logger) error {
 	return nil
 }
 
-func repoModified(repo *git.Repository) (bool, error) {
-	wt, err := repo.Worktree()
-	if err != nil {
-		return false, fmt.Errorf("getting worktree: %w", err)
-	}
-
-	status, err := wt.Status()
-	if err != nil {
-		return false, fmt.Errorf("getting status: %w", err)
-	}
-
-	return !status.IsClean(), nil
+func modified(mod1, mod2, sum1, sum2 []byte) bool {
+	return !bytes.Equal(mod1, mod2) || !bytes.Equal(sum1, sum2)
 }
