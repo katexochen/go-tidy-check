@@ -1,7 +1,7 @@
 [![Govulncheck](https://github.com/katexochen/go-tidy-check/actions/workflows/test-govulncheck.yml/badge.svg)](https://github.com/katexochen/go-tidy-check/actions/workflows/test-govulncheck.yml)
 [![Integration tests](https://github.com/katexochen/go-tidy-check/actions/workflows/test-integration.yml/badge.svg)](https://github.com/katexochen/go-tidy-check/actions/workflows/test-integration.yml)
 [![Golangci-lint](https://github.com/katexochen/go-tidy-check/actions/workflows/test-lint.yml/badge.svg)](https://github.com/katexochen/go-tidy-check/actions/workflows/test-lint.yml)
-
+[![Go Report Card](https://goreportcard.com/badge/github.com/katexochen/go-tidy-check)](https://goreportcard.com/report/github.com/katexochen/go-tidy-check)
 
 # 🧹 Check if your modules are tidy
 
