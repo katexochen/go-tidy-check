@@ -25,7 +25,21 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	untidy, err := run(ctx)
+	flag.Usage = func() {
+		fmt.Fprintf(flag.CommandLine.Output(), "go-tidy-check checks if your modules are tidy.\n\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "Usage: \n  %s [flags] [PATH ...]\n\n", os.Args[0])
+		fmt.Fprintln(flag.CommandLine.Output(), "Flags:")
+		flag.PrintDefaults()
+	}
+	flags := flags{
+		verbose: flag.Bool("v", false, "verbose debug output"),
+		version: flag.Bool("version", false, "print version and exit"),
+		diff:    flag.Bool("d", false, "print diffs"),
+	}
+	flag.Parse()
+	args := flag.Args()
+
+	untidy, err := run(ctx, flags, args)
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
 		os.Exit(1)
@@ -35,26 +49,20 @@ func main() {
 	}
 }
 
-func run(ctx context.Context) (bool, error) {
-	flag.Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(), "go-tidy-check checks if your modules are tidy.\n\n")
-		fmt.Fprintf(flag.CommandLine.Output(), "Usage: \n  %s [flags] [PATH ...]\n\n", os.Args[0])
-		fmt.Fprintln(flag.CommandLine.Output(), "Flags:")
-		flag.PrintDefaults()
-	}
-	verbose := flag.Bool("v", false, "verbose debug output")
-	version := flag.Bool("version", false, "print version and exit")
-	diff := flag.Bool("d", false, "print diffs")
-	flag.Parse()
-	paths := flag.Args()
+type flags struct {
+	diff    *bool
+	verbose *bool
+	version *bool
+}
 
-	if *version {
+func run(ctx context.Context, flags flags, paths []string) (bool, error) {
+	if *flags.version {
 		fmt.Printf("go-tidy-check %s\n", Version)
 		return false, nil
 	}
 
 	var logger logger
-	if *verbose {
+	if *flags.verbose {
 		logger = debugLogger{}
 	} else {
 		logger = nopLogger{}
@@ -74,7 +82,7 @@ func run(ctx context.Context) (bool, error) {
 
 	var result bool
 	for _, path := range paths {
-		untidy, err := check(ctx, path, *diff, logger)
+		untidy, err := check(ctx, path, *flags.diff, logger)
 		if err != nil {
 			return false, fmt.Errorf("checking module %q: %w", path, err)
 		}
@@ -110,7 +118,7 @@ func check(ctx context.Context, path string, diff bool, logger logger) (bool, er
 	}
 
 	logger.Log("reading %q & %q", modPath, sumPath)
-	mod, sum, err := readFiles(modPath, sumPath)
+	mod, sum, err := readFiles(modPath, sumPath, logger)
 	if err != nil {
 		return false, err
 	}
@@ -120,8 +128,12 @@ func check(ctx context.Context, path string, diff bool, logger logger) (bool, er
 	logger.Log("running go mod tidy")
 	tidyCmd := exec.CommandContext(ctx, "go", "mod", "tidy")
 	tidyCmd.Dir = path
-	if err := tidyCmd.Run(); err != nil {
-		panic(err)
+	out, err := tidyCmd.CombinedOutput()
+	var tidyErr *exec.ExitError
+	if errors.As(err, &tidyErr) {
+		return false, fmt.Errorf("running 'go mod tidy': %w; %s", tidyErr, out)
+	} else if err != nil {
+		return false, fmt.Errorf("running 'go mod tidy': %w", err)
 	}
 
 	logger.Log("checking if go.mod and go.sum have been modified")
@@ -149,20 +161,24 @@ func check(ctx context.Context, path string, diff bool, logger logger) (bool, er
 	}
 
 	logger.Log("generating diffs")
-	if err := printDiffs(modPath, sumPath, mod, sum); err != nil {
+	if err := printDiffs(modPath, sumPath, mod, sum, logger); err != nil {
 		return false, fmt.Errorf("printing diffs: %w", err)
 	}
 
 	return true, nil
 }
 
-func readFiles(modPath, sumPath string) (mod, sum []byte, err error) {
+func readFiles(modPath, sumPath string, logger logger) (mod, sum []byte, err error) {
 	mod, err = os.ReadFile(modPath)
 	if err != nil {
 		return nil, nil, fmt.Errorf("reading %q: %w", modPath, err)
 	}
 
 	sum, err = os.ReadFile(sumPath)
+	if errors.Is(err, os.ErrNotExist) {
+		logger.Log("%q does not exist, using empty string", sumPath)
+		return mod, []byte{}, nil
+	}
 	if err != nil {
 		return nil, nil, fmt.Errorf("reading %q: %w", sumPath, err)
 	}
@@ -193,8 +209,8 @@ func repoReset(repo *git.Repository, logger logger) error {
 	return nil
 }
 
-func printDiffs(modPath, sumPath string, mod, sum []byte) error {
-	mod2, sum2, err := readFiles(modPath, sumPath)
+func printDiffs(modPath, sumPath string, mod, sum []byte, logger logger) error {
+	mod2, sum2, err := readFiles(modPath, sumPath, logger)
 	if err != nil {
 		return err
 	}
