@@ -1,9 +1,6 @@
 FROM golang:1.19 as builder
 WORKDIR /workspace
 
-ARG goproxy=https://proxy.golang.org
-ENV GOPROXY=$goproxy
-
 COPY go.mod go.mod
 COPY go.sum go.sum
 
@@ -16,7 +13,9 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     go build -ldflags "-X main.Version=${RELEASE_VERSION}" \
     -o go-tidy-check .
 
-FROM golang:1.19
+FROM gcr.io/distroless/base:latest
 WORKDIR /
 COPY --from=builder /workspace/go-tidy-check .
+COPY --from=builder /usr/local/go/bin/go /usr/local/go/bin/go
+ENV PATH="${PATH}:/usr/local/go/bin"
 ENTRYPOINT ["/go-tidy-check"]
