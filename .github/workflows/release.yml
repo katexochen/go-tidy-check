@@ -31,17 +31,26 @@ jobs:
       - name: Build cross-platform binaries
         env:
           PLATFORMS: darwin/amd64 darwin/arm64 windows/amd64 linux/amd64 linux/arm64
-          VERSION_INJECT: github.com/katexochen/go-tidy-check.Version
           OUTPUT_PATH_FORMAT: ./bin/${{ env.RELEASE_VERSION }}/{{.OS}}/{{.Arch}}/go-tidy-check
         run: |
-          gox -osarch="${PLATFORMS}" -ldflags "-X ${VERSION_INJECT}=${RELEASE_VERSION}" -output "${OUTPUT_PATH_FORMAT}"
+          gox -osarch="${PLATFORMS}" -ldflags "-X main.Version=${RELEASE_VERSION}" -output "${OUTPUT_PATH_FORMAT}"
+
+      - name: Test correct version injection
+        run: |
+          chmod +x ./bin/${{ env.RELEASE_VERSION }}/linux/amd64/go-tidy-check
+          version=$(./bin/${{ env.RELEASE_VERSION }}/linux/amd64/go-tidy-check --version)
+          if [ "${version}" != "go-tidy-check ${{ env.RELEASE_VERSION }}" ]; then
+            echo "Version injection failed. Expected '${{ env.RELEASE_VERSION }}', got '${version}'"
+            exit 1
+          fi
 
       - name: Generate release notes
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh api -X POST 'repos/{owner}/{repo}/releases/generate-notes' \
-            -F commitish=${{ env.RELEASE_VERSION }} \
+          gh api --method POST \
+            -H "Accept: application/vnd.github+json" \
+            /repos/{owner}/{repo}/releases/generate-notes \
             -F tag_name=${{ env.RELEASE_VERSION }} \
             > tmp-release-notes.json
 
@@ -90,6 +99,8 @@ jobs:
         uses: docker/build-push-action@v2
         with:
           push: true
+          build-args: |
+            VERSION=${{ env.RELEASE_VERSION }}
           tags: |
             ghcr.io/katexochen/go-tidy-check:${{ env.RELEASE_VERSION }}
             ghcr.io/katexochen/go-tidy-check:${{ steps.majorver.outputs.major-tag }}

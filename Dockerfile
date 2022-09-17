@@ -8,9 +8,9 @@ RUN go mod download all
 
 COPY ./ ./
 
-ARG RELEASE_VERSION
+ARG VERSION
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-    go build -ldflags "-X main.Version=${RELEASE_VERSION}" \
+    go build -ldflags "-X main.Version=${VERSION}" \
     -o go-tidy-check .
 
 FROM gcr.io/distroless/base:latest
