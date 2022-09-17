@@ -107,7 +107,9 @@ func check(ctx context.Context, path string, diff bool, logger logger) (bool, er
 		return false, err
 	}
 
-	defer restoreFiles(modPath, sumPath, mod, sum, logger)
+	defer func() {
+		_ = restoreFiles(modPath, sumPath, mod, sum, logger)
+	}()
 
 	logger.Log("running go mod tidy")
 	tidyCmd := exec.CommandContext(ctx, "go", "mod", "tidy")
@@ -147,9 +149,7 @@ func check(ctx context.Context, path string, diff bool, logger logger) (bool, er
 	}
 
 	logger.Log("generating diffs")
-	if err := printDiffs(modPath, sumPath, mod, mod2, sum, sum2, logger); err != nil {
-		return false, fmt.Errorf("printing diffs: %w", err)
-	}
+	printDiffs(modPath, sumPath, mod, mod2, sum, sum2, logger)
 
 	return true, nil
 }
@@ -196,7 +196,7 @@ func restoreFiles(modPath, sumPath string, mod, sum []byte, logger logger) error
 	return nil
 }
 
-func printDiffs(modPath, sumPath string, mod1, mod2, sum1, sum2 []byte, logger logger) error {
+func printDiffs(modPath, sumPath string, mod1, mod2, sum1, sum2 []byte, logger logger) {
 	if !bytes.Equal(mod1, mod2) {
 		edits := myers.ComputeEdits(span.URIFromPath("go.mod"), string(mod1), string(mod2))
 		fmt.Println(gotextdiff.ToUnified(
@@ -205,7 +205,8 @@ func printDiffs(modPath, sumPath string, mod1, mod2, sum1, sum2 []byte, logger l
 			string(mod1),
 			edits,
 		))
-
+	} else {
+		logger.Log("%q is unchanged", modPath)
 	}
 
 	if !bytes.Equal(sum1, sum2) {
@@ -216,9 +217,9 @@ func printDiffs(modPath, sumPath string, mod1, mod2, sum1, sum2 []byte, logger l
 			string(sum1),
 			edits,
 		))
+	} else {
+		logger.Log("%q is unchanged", sumPath)
 	}
-
-	return nil
 }
 
 func modified(mod1, mod2, sum1, sum2 []byte) bool {
