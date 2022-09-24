@@ -81,8 +81,8 @@ jobs:
           gh release create ${{ env.RELEASE_VERSION }} \
             -t "$(jq -r .name tmp-release-notes.json)" \
             -F tmp-release-notes.md \
-            "${OUT_BASE}/darwin/amd64/go-tidy-check_darwin_amd64.tar.gz#go-tidy-check_osx_amd64" \
-            "${OUT_BASE}/darwin/arm64/go-tidy-check_darwin_arm64.tar.gz#go-tidy-check_osx_arm64" \
+            "${OUT_BASE}/darwin/amd64/go-tidy-check_darwin_amd64.tar.gz#go-tidy-check_macos_amd64" \
+            "${OUT_BASE}/darwin/arm64/go-tidy-check_darwin_arm64.tar.gz#go-tidy-check_macos_arm64" \
             "${OUT_BASE}/windows/amd64/go-tidy-check_windows_amd64.tar.gz#go-tidy-check_windows_amd64" \
             "${OUT_BASE}/linux/amd64/go-tidy-check_linux_amd64.tar.gz#go-tidy-check_linux_amd64" \
             "${OUT_BASE}/linux/arm64/go-tidy-check_linux_arm64.tar.gz#go-tidy-check_linux_arm64"
