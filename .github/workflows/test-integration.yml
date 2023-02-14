@@ -1,4 +1,4 @@
-name: Integration tests
+name: integration test
 
 on:
   push:
@@ -13,12 +13,56 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
 
-      - name: Set up Go
-        uses: actions/setup-go@v3
+      - name: Setup Go
+        uses: actions/setup-go@v2
         with:
-          go-version-file: go.mod
+          go-version: "1.20"
 
-      - name: Run integration tests
-        run: go test -v ./...
-        env:
-          INTEGRATION_TEST: "true"
+      - name: Run action on tidy module
+        uses: ./
+        with:
+          modules: ./testdata/tidy/module3
+
+      - name: Run action on untidy module
+        id: should-fail-1
+        continue-on-error: true
+        uses: ./
+        with:
+          modules: ./testdata/untidy/module2
+
+      - name: Check previous step failed
+        if: steps.should-fail-1.outcome != 'failure'
+        shell: bash
+        run: |
+          echo "Previous step should have failed"
+          exit 1
+
+      - name: Run action on untidy module with submodules
+        id: should-fail-2
+        continue-on-error: true
+        uses: ./
+        with:
+          modules: ./testdata/untidy/module1
+          submodules: true
+
+      - name: Check previous step failed
+        if: steps.should-fail-2.outcome != 'failure'
+        shell: bash
+        run: |
+          echo "Previous step should have failed"
+          exit 1
+
+      - name: Run action on untidy module with submodules and go.work
+        id: should-fail-3
+        continue-on-error: true
+        uses: ./
+        with:
+          modules: ./testdata/untidy/module3
+          submodules: true
+
+      - name: Check previous step failed
+        if: steps.should-fail-3.outcome != 'failure'
+        shell: bash
+        run: |
+          echo "Previous step should have failed"
+          exit 1

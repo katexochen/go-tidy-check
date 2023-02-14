@@ -1,16 +1,76 @@
 name: go-tidy-check
-author: katexochen
+author: Paul Meyer (katexochen)
 description: go-tidy-check checks if your modules are tidy.
+branding:
+  icon: check
+  color: blue
+
 inputs:
   modules:
     description: Path(s) of the modules to check. Separate multiple paths with space. Current working dir is used if empty.
     required: false
+  submodules:
+    description: |
+      Whether to check submodules. Default is false. If there is a go.work file, the submodules of the workspace are checked.
+      Otherwise the action searches subdirectories for go.mod files and checks them.
+    required: false
+
 runs:
-  using: docker
-  image: docker://ghcr.io/katexochen/go-tidy-check:v1.0.2
-  args:
-    - -d
-    - ${{ inputs.modules }}
-branding:
-  icon: check
-  color: blue
+  using: composite
+  steps:
+    - name: Execute tidy-check script
+      shell: bash
+      env:
+        INPUTS_MODULES: ${{ inputs.modules }}
+        INPUTS_SUBMODULES: ${{ inputs.submodules }}
+      run: |
+        if [[ "${INPUTS_SUBMODULES}" == "true" ]]; then
+          checkSubmodules=true
+        fi
+
+        if ! git diff --exit-code --quiet; then
+          echo "Working directory is not clean, please commit or stash changes"
+          exit 1
+        fi
+
+        version=$(go version)
+        if [[ "${version}" != *"go1.20"* ]]; then
+          echo "Go version must be 1.20 or higher"
+          exit 1
+        fi
+
+        if [[ -z "${INPUTS_MODULES}" ]]; then
+          echo "No modules specified, checking current working directory"
+          topLevelModules=$(pwd)
+        else
+          echo "Modules specified in input: ${INPUTS_MODULES}"
+          topLevelModules="${INPUTS_MODULES}"
+        fi
+
+        allModules="${topLevelModules}"
+
+        if [[ "${checkSubmodules}" == true ]]; then
+          echo "Listing submodules"
+          for module in ${topLevelModules}; do
+            echo "Listing submodules of $module"
+
+            if [[ -f "$module/go.work" ]]; then
+              echo "go.work file found, using workspace"
+              subModules=$(go list -f '{{.Dir}}' -m)
+              allModules="${allModules} ${subModules}"
+            else
+              echo "go.work file not found, searching subdirectories"
+              subModules=$(find . -name go.mod -exec sh -c 'dirname $1 | xargs realpath' shell {} \;)
+              allModules="${allModules} ${subModules}"
+            fi
+          done
+        else
+          echo "Submodules not checked"
+        fi
+
+        for module in ${allModules}; do
+          echo "Checking module $module"
+          go mod tidy -C "$module"
+        done
+
+        git diff --exit-code
