@@ -33,12 +33,6 @@ runs:
           exit 1
         fi
 
-        version=$(go version)
-        if [[ "${version}" != *"go1.20"* ]]; then
-          echo "Go version must be 1.20 or higher"
-          exit 1
-        fi
-
         if [[ -z "${INPUTS_MODULES}" ]]; then
           echo "No modules specified, checking current working directory"
           topLevelModules=$(pwd)

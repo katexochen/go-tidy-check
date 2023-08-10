@@ -18,7 +18,7 @@ name: Go mod tidy check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - uses: actions/setup-go@v3
+      - uses: actions/setup-go@v4 # Go version must be at least 1.20.
 
       - uses: katexochen/go-tidy-check@v2
         with:
