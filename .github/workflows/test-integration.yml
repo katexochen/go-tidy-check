@@ -9,6 +9,36 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        go-version: [
+          "1.20",
+          "stable"
+        ]
+        name: [
+          "module 3 tidy",
+          "module 2 untidy",
+          "module 1 untidy",
+          "module 3 untidy"
+        ]
+        include:
+          - name: module 3 tidy
+            target: ./testdata/tidy/module3
+            should-fail: false
+            submodules: false
+          - name: module 2 untidy
+            target: ./testdata/untidy/module2
+            should-fail: true
+            submodules: false
+          - name: module 1 untidy
+            target: ./testdata/untidy/module1
+            should-fail: true
+            submodules: true
+          - name: module 3 untidy
+            target: ./testdata/tidy/module3
+            should-fail: true
+            submodules: true
     steps:
       - name: Checkout
         uses: actions/checkout@24cb9080177205b6e8c946b17badbe402adc938f # v3
@@ -16,53 +46,11 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@4d34df0c2316fe8122ab82dc22947d607c0c91f9 # v4
         with:
-          go-version: "1.20"
+          go-version: ${{ matrix.go-version }}
 
-      - name: Run action on tidy module
+      - name: Run action on module
+        continue-on-error: ${{ matrix.should-fail }}
         uses: ./
         with:
-          modules: ./testdata/tidy/module3
-
-      - name: Run action on untidy module
-        id: should-fail-1
-        continue-on-error: true
-        uses: ./
-        with:
-          modules: ./testdata/untidy/module2
-
-      - name: Check previous step failed
-        if: steps.should-fail-1.outcome != 'failure'
-        shell: bash
-        run: |
-          echo "Previous step should have failed"
-          exit 1
-
-      - name: Run action on untidy module with submodules
-        id: should-fail-2
-        continue-on-error: true
-        uses: ./
-        with:
-          modules: ./testdata/untidy/module1
-          submodules: true
-
-      - name: Check previous step failed
-        if: steps.should-fail-2.outcome != 'failure'
-        shell: bash
-        run: |
-          echo "Previous step should have failed"
-          exit 1
-
-      - name: Run action on untidy module with submodules and go.work
-        id: should-fail-3
-        continue-on-error: true
-        uses: ./
-        with:
-          modules: ./testdata/untidy/module3
-          submodules: true
-
-      - name: Check previous step failed
-        if: steps.should-fail-3.outcome != 'failure'
-        shell: bash
-        run: |
-          echo "Previous step should have failed"
-          exit 1
+          modules: ${{ matrix.target }}
+          submodules: ${{ matrix.submodules }}
